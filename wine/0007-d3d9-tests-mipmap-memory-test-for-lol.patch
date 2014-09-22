@@ -1,0 +1,143 @@
+From c3a3dbee532408b7101d03fdb4c847dbd68506d1 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Stefan=20D=C3=B6singer?= <stefan@codeweavers.com>
+Date: Wed, 22 May 2013 08:32:46 +0200
+Subject: [PATCH 7/9] d3d9/tests: mipmap memory test for lol
+Reply-To: wine-devel <wine-devel@winehq.org>
+
+---
+ dlls/d3d9/tests/device.c | 112 +++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 112 insertions(+)
+
+diff --git a/dlls/d3d9/tests/device.c b/dlls/d3d9/tests/device.c
+index 38c2fff..d3f4ef5 100644
+--- a/dlls/d3d9/tests/device.c
++++ b/dlls/d3d9/tests/device.c
+@@ -7442,6 +7442,117 @@ static void test_lockbox_invalid(void)
+     DestroyWindow(window);
+ }
+ 
++static void test_mipmap_memory(void)
++{
++    IDirect3DDevice9 *device;
++    IDirect3D9 *d3d9;
++    UINT refcount;
++    HWND window;
++    HRESULT hr;
++    unsigned int lvl, pool, fmt, mem_size, tex_size, levels;
++    IDirect3DTexture9 *texture;
++    D3DLOCKED_RECT lr;
++    BYTE *prev;
++    static const struct
++    {
++        D3DPOOL pool;
++        const char *name;
++    }
++    pools[] =
++    {
++        {D3DPOOL_MANAGED,       "D3DPOOL_MANAGED"},
++        {D3DPOOL_SYSTEMMEM,     "D3DPOOL_SYSTEMMEM"},
++        {D3DPOOL_SCRATCH,       "D3DPOOL_SCRATCH"},
++        /*{D3DPOOL_DEFAULT,       "D3DPOOL_DEFAULT"}, doesn't have the address relation */
++    };
++    static const struct
++    {
++        D3DFORMAT format;
++        const char *name;
++        unsigned int size;
++    }
++    formats[] =
++    {
++        {D3DFMT_A8R8G8B8,       "D3DFMT_A8R8G8B8",      4},
++        /* A8 is not supported everywhere(e.g. r200), use L8 instead.
++         * I'm not sure if L8 is supported on all GPUs, so test both
++         * to make sure one 8 bit format is tested. */
++        {D3DFMT_A8,             "D3DFMT_A8",            1},
++        {D3DFMT_L8,             "D3DFMT_L8",            1},
++    };
++
++    static const unsigned int alignment = 8, create_size = 256;
++
++    if (!(d3d9 = pDirect3DCreate9(D3D_SDK_VERSION)))
++    {
++        skip("Failed to create IDirect3D9 object, skipping tests.\n");
++        return;
++    }
++
++    window = CreateWindowA("static", "d3d9_test", WS_OVERLAPPEDWINDOW,
++            0, 0, 640, 480, 0, 0, 0, 0);
++    if (!(device = create_device(d3d9, window, window, TRUE)))
++    {
++        skip("Failed to create a D3D device, skipping tests.\n");
++        DestroyWindow(window);
++        return;
++    }
++
++    for (pool = 0; pool < sizeof(pools) / sizeof(*pools); pool++)
++    {
++        DWORD usage;
++
++        if (pools[pool].pool == D3DPOOL_DEFAULT)
++            usage = D3DUSAGE_DYNAMIC;
++        else
++            usage = 0;
++
++        for (fmt = 0; fmt < sizeof(formats) / sizeof(*formats); fmt++)
++        {
++            hr = IDirect3D9_CheckDeviceFormat(d3d9, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
++                    D3DFMT_X8R8G8B8, usage, D3DRTYPE_TEXTURE, formats[fmt].format);
++            if (FAILED(hr))
++            {
++                skip("Format %s is not supported, skipping texture pointer test for this format\n",
++                        formats[fmt].name);
++                continue;
++            }
++
++            hr = IDirect3DDevice9_CreateTexture(device, create_size, create_size, 0,
++                    usage, formats[fmt].format, pools[pool].pool, &texture, NULL);
++            ok(SUCCEEDED(hr), "Failed to create %s %s texture, hr %#x.\n",
++                    pools[pool].name, formats[fmt].name, hr);
++
++            prev = NULL;
++            levels = IDirect3DTexture9_GetLevelCount(texture);
++            for (lvl = 0; lvl < levels; lvl++)
++            {
++                unsigned int row_block_count, row_count;
++                hr = IDirect3DTexture9_LockRect(texture, lvl, &lr, NULL, 0);
++                ok(SUCCEEDED(hr), "Failed to lock level %u, hr %#x.\n", lvl, hr);
++
++                if (prev)
++                {
++                    todo_wine ok(prev + mem_size == lr.pBits, "%s, %s, lvl %u: Expected pointer %p, got %p\n",
++                            pools[pool].name, formats[fmt].name, lvl, prev + mem_size, lr.pBits);
++                }
++                tex_size = create_size >> lvl;
++                mem_size = (tex_size * tex_size * formats[fmt].size + (alignment - 1)) & ~(alignment - 1);
++                prev = lr.pBits;
++
++                hr = IDirect3DTexture9_UnlockRect(texture, lvl);
++                ok(SUCCEEDED(hr), "Failed to unlock level %u, hr %#x.\n", lvl, hr);
++            }
++            IDirect3DTexture9_Release(texture);
++        }
++    }
++
++    refcount = IDirect3DDevice9_Release(device);
++    ok(!refcount, "Device has %u references left.\n", refcount);
++    IDirect3D9_Release(d3d9);
++    DestroyWindow(window);
++}
++
+ START_TEST(device)
+ {
+     HMODULE d3d9_handle = LoadLibraryA( "d3d9.dll" );
+@@ -7537,6 +7648,7 @@ START_TEST(device)
+         test_create_rt_ds_fail();
+         test_volume_blocks();
+         test_lockbox_invalid();
++        test_mipmap_memory();
+     }
+ 
+ out:
+-- 
+1.8.1.5
+

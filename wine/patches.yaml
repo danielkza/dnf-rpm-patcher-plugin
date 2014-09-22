@@ -1,0 +1,8 @@
+patches:
+    lol-mipmap-hacks:
+      - patch: 0001-HACK-Disallow-block-based-textures-with-sub-block-si.patch
+        options: -p1
+        after_patch: wine-cjk.patch
+      - patch: 0007-d3d9-tests-mipmap-memory-test-for-lol.patch
+        options: -p1
+        after_patch: wine-cjk.patch
